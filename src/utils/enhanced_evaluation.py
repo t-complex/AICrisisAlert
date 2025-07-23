@@ -37,60 +37,40 @@ from dataclasses import dataclass
 # Import base evaluation components
 try:
     from .evaluation import (
-        CrisisEvaluator, EvaluationResults, CRISIS_LABELS
+        CrisisEvaluator, EvaluationResults
     )
+    from src.training.constants import CRISIS_LABELS, CRISIS_TYPE_MAPPING
+    from src.training.statistics import StatisticalAnalyzer, TemporalAnalyzer
+    from src.training.simulation import CrisisImpactAssessor
+    from src.training.error_analysis import ErrorAnalyzer
 except ImportError:
     # Fallback for when running as standalone script
     import sys
     from pathlib import Path
     sys.path.append(str(Path(__file__).parent))
     from evaluation import (
-        CrisisEvaluator, EvaluationResults, CRISIS_LABELS
+        CrisisEvaluator, EvaluationResults
     )
+    from src.training.constants import CRISIS_LABELS, CRISIS_TYPE_MAPPING
+    from src.training.statistics import StatisticalAnalyzer, TemporalAnalyzer
+    from src.training.simulation import CrisisImpactAssessor
+    from src.training.error_analysis import ErrorAnalyzer
+
+# Import reporting components
+try:
+    from src.training.reporting import generate_enhanced_evaluation_report
+except ImportError:
+    # Fallback for when running as standalone script
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).parent))
+    from src.training.reporting import generate_enhanced_evaluation_report
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Enhanced crisis type mappings for detailed analysis
-CRISIS_TYPE_MAPPING = {
-    "requests_or_urgent_needs": {
-        "category": "humanitarian", 
-        "severity": "critical", 
-        "response_time": 15,
-        "impact_multiplier": 3.0
-    },
-    "infrastructure_and_utility_damage": {
-        "category": "humanitarian", 
-        "severity": "high", 
-        "response_time": 60,
-        "impact_multiplier": 2.5
-    },
-    "injured_or_dead_people": {
-        "category": "humanitarian", 
-        "severity": "critical", 
-        "response_time": 10,
-        "impact_multiplier": 5.0
-    },
-    "rescue_volunteering_or_donation_effort": {
-        "category": "humanitarian", 
-        "severity": "medium", 
-        "response_time": 120,
-        "impact_multiplier": 1.5
-    },
-    "other_relevant_information": {
-        "category": "information", 
-        "severity": "low", 
-        "response_time": 480,
-        "impact_multiplier": 1.0
-    },
-    "not_humanitarian": {
-        "category": "non_crisis", 
-        "severity": "none", 
-        "response_time": 0,
-        "impact_multiplier": 0.0
-    }
-}
 
 @dataclass
 class EnhancedEvaluationResults:
@@ -116,228 +96,6 @@ class EnhancedEvaluationResults:
     temporal_trends: Optional[Dict[str, Any]] = None
     comparative_analysis: Optional[Dict[str, Any]] = None
     fairness_metrics: Optional[Dict[str, Any]] = None
-
-
-class StatisticalAnalyzer:
-    """
-    Statistical significance testing and confidence interval computation.
-    Provides bootstrap confidence intervals, statistical tests for model
-    comparison, and effect size calculations for crisis classification.
-    """
-    def __init__(self, n_bootstrap: int = 1000, confidence_level: float = 0.95):
-        self.n_bootstrap = n_bootstrap
-        self.confidence_level = confidence_level
-        self.alpha = 1 - confidence_level
-
-    def bootstrap_confidence_intervals(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        y_proba: Optional[np.ndarray] = None,
-        metrics: Optional[List[str]] = None
-    ) -> Dict[str, Tuple[float, float]]:
-        if metrics is None:
-            metrics = ['accuracy', 'macro_f1', 'weighted_f1', 'precision', 'recall']
-        n_samples = len(y_true)
-        bootstrap_results = {metric: [] for metric in metrics}
-        for _ in range(self.n_bootstrap):
-            indices = np.random.choice(n_samples, n_samples, replace=True)
-            y_true_boot = y_true[indices]
-            y_pred_boot = y_pred[indices]
-            y_proba_boot = y_proba[indices] if y_proba is not None else None
-            if 'accuracy' in metrics:
-                bootstrap_results['accuracy'].append(accuracy_score(y_true_boot, y_pred_boot))
-            if 'macro_f1' in metrics:
-                f1 = precision_recall_fscore_support(y_true_boot, y_pred_boot, average='macro', zero_division='warn')[2]
-                bootstrap_results['macro_f1'].append(f1)
-            if 'weighted_f1' in metrics:
-                f1 = precision_recall_fscore_support(y_true_boot, y_pred_boot, average='weighted', zero_division='warn')[2]
-                bootstrap_results['weighted_f1'].append(f1)
-            if 'precision' in metrics:
-                prec = precision_recall_fscore_support(y_true_boot, y_pred_boot, average='macro', zero_division='warn')[0]
-                bootstrap_results['precision'].append(prec)
-            if 'recall' in metrics:
-                rec = precision_recall_fscore_support(y_true_boot, y_pred_boot, average='macro', zero_division='warn')[1]
-                bootstrap_results['recall'].append(rec)
-        confidence_intervals = {}
-        alpha_lower = (1 - self.confidence_level) / 2
-        alpha_upper = 1 - alpha_lower
-        for metric, values in bootstrap_results.items():
-            lower = np.percentile(values, alpha_lower * 100)
-            upper = np.percentile(values, alpha_upper * 100)
-            confidence_intervals[metric] = (float(lower), float(upper))
-        return confidence_intervals
-
-    def mcnemar_test(
-        self,
-        y_true: np.ndarray,
-        y_pred1: np.ndarray,
-        y_pred2: np.ndarray
-    ) -> Dict[str, float]:
-        correct1 = (y_true == y_pred1)
-        correct2 = (y_true == y_pred2)
-        both_correct = np.sum(correct1 & correct2)
-        model1_only = np.sum(correct1 & ~correct2)
-        model2_only = np.sum(~correct1 & correct2)
-        both_wrong = np.sum(~correct1 & ~correct2)
-        if model1_only + model2_only == 0:
-            return {'statistic': 0.0, 'p_value': 1.0, 'effect_size': 0.0}
-        statistic = (abs(model1_only - model2_only) - 1) ** 2 / (model1_only + model2_only)
-        p_value = 1 - stats.chi2.cdf(statistic, 1)
-        acc1 = accuracy_score(y_true, y_pred1)
-        acc2 = accuracy_score(y_true, y_pred2)
-        effect_size = acc1 - acc2
-        return {
-            'statistic': float(statistic),
-            'p_value': float(p_value),
-            'effect_size': float(effect_size),
-            'model1_only_correct': int(model1_only),
-            'model2_only_correct': int(model2_only)
-        }
-
-    def compute_effect_sizes(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        baseline_accuracy: Optional[float] = None
-    ) -> Dict[str, float]:
-        accuracy = accuracy_score(y_true, y_pred)
-        effect_sizes = {}
-        if baseline_accuracy is not None:
-            p = baseline_accuracy
-            std_baseline = np.sqrt(p * (1 - p) / len(y_true))
-            cohens_d = (accuracy - baseline_accuracy) / std_baseline if std_baseline > 0 else 0.0
-            effect_sizes['cohens_d'] = float(cohens_d)
-        mcc = matthews_corrcoef(y_true, y_pred)
-        effect_sizes['mcc'] = float(mcc)
-        kappa = cohen_kappa_score(y_true, y_pred)
-        effect_sizes['kappa'] = float(kappa)
-        return effect_sizes
-
-
-class TemporalAnalyzer:
-    """
-    Time-based performance analysis for crisis classification.
-    """
-    def __init__(self):
-        pass
-    def analyze_temporal_trends(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        timestamps: Optional[List[datetime]] = None,
-        window_size: int = 100
-    ) -> Dict[str, Any]:
-        if timestamps is None or len(timestamps) != len(y_true):
-            return {'message': 'No valid timestamps provided for temporal analysis.'}
-        df = pd.DataFrame({'timestamp': pd.to_datetime(timestamps), 'true': y_true, 'pred': y_pred})
-        df = df.sort_values('timestamp')
-        df['correct'] = df['true'] == df['pred']
-        rolling_acc = df['correct'].rolling(window=window_size, min_periods=1).mean().tolist()
-        return {
-            'rolling_accuracy': rolling_acc,
-            'timestamps': df['timestamp'].tolist()
-        }
-
-
-class CrisisImpactAssessor:
-    """
-    Real-world impact assessment for crisis classification decisions.
-    Evaluates the practical consequences of classification decisions
-    in terms of resource allocation, response time, and crisis outcomes.
-    """
-    def __init__(self):
-        self.crisis_weights = {
-            label: CRISIS_TYPE_MAPPING[label]["impact_multiplier"] 
-            for label in CRISIS_LABELS
-        }
-
-    def assess_crisis_impact(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        y_proba: Optional[np.ndarray] = None
-    ) -> Dict[str, float]:
-        impact_metrics = {}
-        weights = np.array([self.crisis_weights[CRISIS_LABELS[label]] for label in y_true])
-        correct = (y_true == y_pred).astype(float)
-        weighted_accuracy = np.average(correct, weights=weights)
-        impact_metrics['weighted_accuracy'] = float(weighted_accuracy)
-        # Critical miss rate (missing critical crises)
-        critical_indices = [0, 2]  # requests_or_urgent_needs, injured_or_dead_people
-        critical_mask = np.isin(y_true, critical_indices)
-        critical_missed = np.sum(critical_mask & (y_true != y_pred))
-        total_critical = np.sum(critical_mask)
-        critical_miss_rate = critical_missed / total_critical if total_critical > 0 else 0.0
-        impact_metrics['critical_miss_rate'] = float(critical_miss_rate)
-        # False alarm rate for non-crises
-        non_crisis_index = 5  # not_humanitarian
-        non_crisis_mask = (y_true == non_crisis_index)
-        false_alarms = np.sum(non_crisis_mask & (y_pred != non_crisis_index))
-        total_non_crisis = np.sum(non_crisis_mask)
-        false_alarm_rate = false_alarms / total_non_crisis if total_non_crisis > 0 else 0.0
-        impact_metrics['false_alarm_rate'] = float(false_alarm_rate)
-        # Resource allocation efficiency
-        efficiency = self._compute_resource_efficiency(y_true, y_pred)
-        impact_metrics['resource_efficiency'] = efficiency
-        # Expected response delay
-        expected_delay = self._compute_expected_delay(y_true, y_pred)
-        impact_metrics['expected_response_delay'] = expected_delay
-        # Crisis escalation risk
-        escalation_risk = self._compute_escalation_risk(y_true, y_pred)
-        impact_metrics['escalation_risk'] = escalation_risk
-        return impact_metrics
-
-    def _compute_resource_efficiency(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray
-    ) -> float:
-        perfect_allocation = sum(self.crisis_weights[CRISIS_LABELS[label]] for label in y_true)
-        actual_allocation = sum(self.crisis_weights[CRISIS_LABELS[label]] for label in y_pred)
-        over_allocation = sum(
-            max(0, self.crisis_weights[CRISIS_LABELS[pred]] - self.crisis_weights[CRISIS_LABELS[true]])
-            for true, pred in zip(y_true, y_pred)
-        )
-        under_allocation = sum(
-            max(0, self.crisis_weights[CRISIS_LABELS[true]] - self.crisis_weights[CRISIS_LABELS[pred]]) * 2
-            for true, pred in zip(y_true, y_pred)
-        )
-        total_penalty = over_allocation + under_allocation
-        efficiency = max(0, 1 - total_penalty / (perfect_allocation + 1e-6))
-        return float(efficiency)
-
-    def _compute_expected_delay(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray
-    ) -> float:
-        total_delay = 0.0
-        for true_label, pred_label in zip(y_true, y_pred):
-            true_response_time = CRISIS_TYPE_MAPPING[CRISIS_LABELS[true_label]]["response_time"]
-            pred_response_time = CRISIS_TYPE_MAPPING[CRISIS_LABELS[pred_label]]["response_time"]
-            if pred_response_time > true_response_time:
-                delay = pred_response_time - true_response_time
-                severity_weight = CRISIS_TYPE_MAPPING[CRISIS_LABELS[true_label]]["impact_multiplier"]
-                total_delay += delay * severity_weight
-        return float(total_delay / len(y_true))
-
-    def _compute_escalation_risk(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray
-    ) -> float:
-        escalation_cases = 0
-        for true_label, pred_label in zip(y_true, y_pred):
-            true_severity = CRISIS_TYPE_MAPPING[CRISIS_LABELS[true_label]]["severity"]
-            pred_severity = CRISIS_TYPE_MAPPING[CRISIS_LABELS[pred_label]]["severity"]
-            if true_severity == "critical" and pred_severity in ["low", "none"]:
-                escalation_cases += 3
-            elif true_severity == "high" and pred_severity in ["low", "none"]:
-                escalation_cases += 2
-            elif true_severity == "medium" and pred_severity == "none":
-                escalation_cases += 1
-        return float(escalation_cases / len(y_true))
 
 
 class EnhancedCrisisEvaluator(CrisisEvaluator):
@@ -409,7 +167,8 @@ class EnhancedCrisisEvaluator(CrisisEvaluator):
         resource_allocation_efficiency = impact_metrics.get('resource_efficiency', 0.0)
 
         # Error analysis
-        error_clustering = self.error_analyzer.analyze(y_true, y_pred, y_proba, texts)
+        error_analyzer = ErrorAnalyzer(self.class_names)
+        error_clustering = error_analyzer.analyze(y_true, y_pred)
         difficulty_analysis = self._analyze_sample_difficulty(y_true, y_pred, y_proba)
 
         # Model reliability
@@ -588,76 +347,6 @@ def evaluate_model_comprehensive(
         y_true, y_pred, y_proba, texts=all_texts if all_texts else None, timestamps=all_timestamps if all_timestamps else None
     )
     return results
-
-
-def generate_enhanced_evaluation_report(
-    results: EnhancedEvaluationResults,
-    model_name: str = "Enhanced Crisis Classifier",
-    output_path: Optional[str] = None
-) -> str:
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    report = f"""# Enhanced Crisis Classification Model Evaluation Report
-**Model**: {model_name}  
-**Generated**: {timestamp}  
-**Evaluation Framework**: Enterprise-Grade Crisis Assessment
-
----
-
-## Executive Summary
-
-This report provides a comprehensive evaluation of the {model_name} for crisis classification across {len(CRISIS_LABELS)} categories. The evaluation includes advanced classification metrics, crisis-specific assessments, calibration analysis, and emergency response simulation.
-
-### Key Performance Indicators
-- **Overall Accuracy**: {results.base_results.accuracy:.4f}
-- **Macro F1-Score**: {results.base_results.macro_f1:.4f}
-- **Humanitarian Crisis Detection F1**: {results.base_results.humanitarian_f1:.4f}
-- **Critical Crisis Detection F1**: {results.base_results.critical_crisis_f1:.4f}
-- **Emergency Response Accuracy**: {results.base_results.emergency_response_accuracy:.4f}
-
----
-
-## Advanced Metrics
-
-| Metric | Score |
-|--------|-------|
-| Balanced Accuracy | {results.balanced_accuracy:.4f} |
-| MCC | {results.mcc:.4f} |
-| Kappa | {results.kappa_score:.4f} |
-| Hamming Loss | {results.hamming_loss:.4f} |
-
----
-
-## Impact Assessment
-
-| Metric | Value |
-|--------|-------|
-""" + '\n'.join([f"| {k.replace('_', ' ').title()} | {v:.4f} |" for k, v in results.impact_metrics.items()]) + """
-
----
-
-## Cross-Validation Metrics
-
-| Metric | Mean | Std |
-|--------|------|-----|
-""" + '\n'.join([f"| {k.replace('_', ' ').title()} | {results.cv_mean_std[k][0]:.4f} | {results.cv_mean_std[k][1]:.4f} |" for k in results.cv_mean_std]) + """
-
----
-
-## Recommendations
-
-- Review high-impact error types and consider targeted data augmentation.
-- Monitor model calibration and retrain with new crisis data as available.
-- Use human-in-the-loop for high-stakes classifications.
-
----
-
-*Report generated by AICrisisAlert Enhanced Evaluation System*
-"""
-    if output_path:
-        with open(output_path, 'w') as f:
-            f.write(report)
-        logger.info(f"Enhanced evaluation report saved to {output_path}")
-    return report
 
 
 # Example usage and testing

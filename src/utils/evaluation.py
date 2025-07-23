@@ -135,8 +135,8 @@ class CrisisEvaluator:
             self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize analyzers
-        self.calibration_analyzer = CalibrationAnalyzer(self.class_names)
-        self.error_analyzer = ErrorAnalyzer(self.class_names)
+        # self.calibration_analyzer = CalibrationAnalyzer(self.class_names) # Removed
+        # self.error_analyzer = ErrorAnalyzer(self.class_names) # Removed
         self.response_simulator = ResponseTimeSimulator()
         
         logger.info(f"CrisisEvaluator initialized for {self.num_classes} classes")
@@ -174,13 +174,13 @@ class CrisisEvaluator:
         # Basic classification metrics
         accuracy = accuracy_score(y_true, y_pred)
         precision, recall, f1, support = precision_recall_fscore_support(
-            y_true, y_pred, average=None, zero_division=0
+            y_true, y_pred, average=None, zero_division='warn'
         )
         
         # Macro/micro/weighted averages
-        macro_f1 = precision_recall_fscore_support(y_true, y_pred, average='macro', zero_division=0)[2]
-        micro_f1 = precision_recall_fscore_support(y_true, y_pred, average='micro', zero_division=0)[2]
-        weighted_f1 = precision_recall_fscore_support(y_true, y_pred, average='weighted', zero_division=0)[2]
+        macro_f1 = precision_recall_fscore_support(y_true, y_pred, average='macro', zero_division='warn')[2]
+        micro_f1 = precision_recall_fscore_support(y_true, y_pred, average='micro', zero_division='warn')[2]
+        weighted_f1 = precision_recall_fscore_support(y_true, y_pred, average='weighted', zero_division='warn')[2]
         
         # Confusion matrices
         cm = confusion_matrix(y_true, y_pred, labels=range(self.num_classes))
@@ -216,12 +216,11 @@ class CrisisEvaluator:
         # Calibration metrics (if probabilities available)
         calibration_metrics = {}
         if y_proba is not None:
-            calibration_metrics = self.calibration_analyzer.analyze(y_true, y_proba)
+            # calibration_metrics = self.calibration_analyzer.analyze(y_true, y_proba) # Removed
+            pass # Placeholder for future integration
         
         # Error analysis
-        error_metrics = self.error_analyzer.analyze(
-            y_true, y_pred, y_proba, texts, self.class_names
-        )
+        error_metrics = self._compute_error_analysis(y_true, y_pred, y_proba, texts) # Updated call
         
         # Response time simulation
         response_metrics = self.response_simulator.simulate(y_true, y_pred)
@@ -230,7 +229,7 @@ class CrisisEvaluator:
         report = classification_report(
             y_true, y_pred,
             target_names=self.class_names,
-            zero_division=0,
+            zero_division='warn',
             digits=4
         )
         
@@ -240,10 +239,10 @@ class CrisisEvaluator:
             macro_f1=float(macro_f1),
             weighted_f1=float(weighted_f1),
             micro_f1=float(micro_f1),
-            per_class_precision=precision.tolist(),
-            per_class_recall=recall.tolist(),
-            per_class_f1=f1.tolist(),
-            per_class_support=support.tolist(),
+            per_class_precision=precision.tolist() if (precision is not None and hasattr(precision, 'tolist') and not isinstance(precision, (float, int))) else ([float(precision)] if isinstance(precision, float) else [int(precision)] if isinstance(precision, int) else list(precision) if isinstance(precision, (list, tuple)) else []),
+            per_class_recall=recall.tolist() if (recall is not None and hasattr(recall, 'tolist') and not isinstance(recall, (float, int))) else ([float(recall)] if isinstance(recall, float) else [int(recall)] if isinstance(recall, int) else list(recall) if isinstance(recall, (list, tuple)) else []),
+            per_class_f1=f1.tolist() if (f1 is not None and hasattr(f1, 'tolist') and not isinstance(f1, (float, int))) else ([float(f1)] if isinstance(f1, float) else [int(f1)] if isinstance(f1, int) else list(f1) if isinstance(f1, (list, tuple)) else []),
+            per_class_support=support.tolist() if (support is not None and hasattr(support, 'tolist') and not isinstance(support, (float, int))) else ([int(support)] if isinstance(support, (int, float)) else list(support) if isinstance(support, (list, tuple)) else []),
             confusion_matrix=cm,
             normalized_confusion_matrix=cm_normalized,
             per_class_auc=per_class_auc,
@@ -256,7 +255,7 @@ class CrisisEvaluator:
             misclassification_patterns=error_metrics['patterns'],
             confidence_distribution=error_metrics['confidence'],
             response_time_metrics=response_metrics,
-            classification_report=report
+            classification_report=str(report)
         )
         
         logger.info("Evaluation completed successfully")
@@ -310,7 +309,7 @@ class CrisisEvaluator:
         humanitarian_pred = np.isin(y_pred, humanitarian_classes).astype(int)
         
         humanitarian_f1 = precision_recall_fscore_support(
-            humanitarian_true, humanitarian_pred, average='binary', zero_division=0
+            humanitarian_true, humanitarian_pred, average='binary', zero_division='warn'
         )[2]
         
         # Critical crisis classification (most urgent classes)
@@ -319,7 +318,7 @@ class CrisisEvaluator:
         critical_pred = np.isin(y_pred, critical_classes).astype(int)
         
         critical_f1 = precision_recall_fscore_support(
-            critical_true, critical_pred, average='binary', zero_division=0
+            critical_true, critical_pred, average='binary', zero_division='warn'
         )[2]
         
         # Emergency response accuracy (ability to identify any crisis)
@@ -332,6 +331,27 @@ class CrisisEvaluator:
             'humanitarian_f1': float(humanitarian_f1),
             'critical_crisis_f1': float(critical_f1),
             'emergency_response_accuracy': float(emergency_accuracy)
+        }
+    
+    def _compute_error_analysis(self, y_true: np.ndarray, y_pred: np.ndarray, y_proba: Optional[np.ndarray], texts: Optional[List[str]]) -> Dict[str, Any]:
+        """Compute error analysis metrics."""
+        # Import CalibrationAnalyzer and ErrorAnalyzer from error_analysis.py
+        from src.training.error_analysis import CalibrationAnalyzer, ErrorAnalyzer
+
+        # Create instances of analyzers
+        calibration_analyzer = CalibrationAnalyzer(self.class_names)
+        error_analyzer = ErrorAnalyzer(self.class_names)
+
+        # Analyze
+        error_analysis_results = error_analyzer.analyze(
+            y_true, y_pred, y_proba, texts, self.class_names
+        )
+        calibration_results = calibration_analyzer.analyze(y_true, y_proba)
+
+        # Combine results
+        return {
+            'patterns': error_analysis_results,
+            'confidence': calibration_results
         }
     
     def plot_confusion_matrix(
@@ -418,7 +438,7 @@ class CrisisEvaluator:
         if self.num_classes == 2:
             y_true_binary = np.hstack([1 - y_true_binary, y_true_binary])
         
-        colors = plt.cm.Set1(np.linspace(0, 1, self.num_classes))
+        colors = plt.cm.get_cmap('Set1')(np.linspace(0, 1, self.num_classes))
         
         for i, (color, class_name) in enumerate(zip(colors, self.class_names)):
             try:
@@ -479,7 +499,7 @@ class CrisisEvaluator:
         if self.num_classes == 2:
             y_true_binary = np.hstack([1 - y_true_binary, y_true_binary])
         
-        colors = plt.cm.Set1(np.linspace(0, 1, self.num_classes))
+        colors = plt.cm.get_cmap('Set1')(np.linspace(0, 1, self.num_classes))
         
         for i, (color, class_name) in enumerate(zip(colors, self.class_names)):
             try:
@@ -511,361 +531,6 @@ class CrisisEvaluator:
                 plt.savefig(self.output_dir / 'precision_recall_curves.png', dpi=300, bbox_inches='tight')
         
         return plt.gcf()
-
-
-class CalibrationAnalyzer:
-    """
-    Confidence score calibration assessment for crisis classification.
-    
-    Analyzes how well the model's confidence scores correspond to actual
-    prediction accuracy, which is crucial for crisis response decision-making.
-    """
-    
-    def __init__(self, class_names: List[str]):
-        """Initialize calibration analyzer."""
-        self.class_names = class_names
-        self.num_classes = len(class_names)
-    
-    def analyze(
-        self, 
-        y_true: np.ndarray, 
-        y_proba: np.ndarray,
-        n_bins: int = 10
-    ) -> Dict[str, float]:
-        """
-        Analyze model calibration.
-        
-        Args:
-            y_true: True labels
-            y_proba: Prediction probabilities
-            n_bins: Number of bins for calibration curve
-            
-        Returns:
-            Dictionary with calibration metrics
-        """
-        # Expected Calibration Error (ECE)
-        ece = self._compute_ece(y_true, y_proba, n_bins)
-        
-        # Reliability score (average confidence for correct predictions)
-        y_pred = np.argmax(y_proba, axis=1)
-        correct_mask = (y_true == y_pred)
-        confidence_scores = np.max(y_proba, axis=1)
-        
-        reliability = np.mean(confidence_scores[correct_mask]) if np.any(correct_mask) else 0.0
-        
-        # Brier score (for binary problems, computed per class)
-        brier_scores = []
-        for i in range(self.num_classes):
-            y_binary = (y_true == i).astype(int)
-            if len(np.unique(y_binary)) > 1:  # Only compute if class is present
-                brier = brier_score_loss(y_binary, y_proba[:, i])
-                brier_scores.append(brier)
-        
-        avg_brier = np.mean(brier_scores) if brier_scores else 0.0
-        
-        return {
-            'ece': float(ece),
-            'reliability': float(reliability),
-            'avg_brier_score': float(avg_brier),
-            'per_class_brier': brier_scores
-        }
-    
-    def _compute_ece(self, y_true: np.ndarray, y_proba: np.ndarray, n_bins: int) -> float:
-        """Compute Expected Calibration Error."""
-        y_pred = np.argmax(y_proba, axis=1)
-        confidence_scores = np.max(y_proba, axis=1)
-        correct = (y_true == y_pred)
-        
-        # Create bins
-        bin_boundaries = np.linspace(0, 1, n_bins + 1)
-        bin_lowers = bin_boundaries[:-1]
-        bin_uppers = bin_boundaries[1:]
-        
-        ece = 0.0
-        for bin_lower, bin_upper in zip(bin_lowers, bin_uppers):
-            # Find samples in this confidence bin
-            in_bin = (confidence_scores > bin_lower) & (confidence_scores <= bin_upper)
-            prop_in_bin = in_bin.mean()
-            
-            if prop_in_bin > 0:
-                accuracy_in_bin = correct[in_bin].mean()
-                avg_confidence_in_bin = confidence_scores[in_bin].mean()
-                ece += np.abs(avg_confidence_in_bin - accuracy_in_bin) * prop_in_bin
-        
-        return ece
-    
-    def plot_calibration_curve(
-        self, 
-        y_true: np.ndarray, 
-        y_proba: np.ndarray,
-        n_bins: int = 10,
-        save_path: Optional[str] = None
-    ) -> plt.Figure:
-        """Plot calibration curve."""
-        plt.figure(figsize=(10, 8))
-        
-        y_pred = np.argmax(y_proba, axis=1)
-        confidence_scores = np.max(y_proba, axis=1)
-        correct = (y_true == y_pred)
-        
-        # Compute calibration curve
-        fraction_of_positives, mean_predicted_value = calibration_curve(
-            correct, confidence_scores, n_bins=n_bins
-        )
-        
-        # Plot calibration curve
-        plt.plot(mean_predicted_value, fraction_of_positives, marker='o', linewidth=2, 
-                label='Crisis Classifier')
-        
-        # Perfect calibration line
-        plt.plot([0, 1], [0, 1], 'k--', label='Perfect Calibration')
-        
-        plt.xlabel('Mean Predicted Probability', fontsize=12)
-        plt.ylabel('Fraction of Positives', fontsize=12)
-        plt.title('Calibration Curve - Crisis Classification', fontsize=16)
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        # Add ECE annotation
-        ece = self._compute_ece(y_true, y_proba, n_bins)
-        plt.text(0.02, 0.98, f'ECE: {ece:.3f}', transform=plt.gca().transAxes, 
-                fontsize=12, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-        
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        
-        return plt.gcf()
-
-
-class ErrorAnalyzer:
-    """
-    Misclassification pattern analysis for crisis classification.
-    
-    Identifies common error patterns, confidence distributions, and provides
-    insights into model failure modes in crisis scenarios.
-    """
-    
-    def __init__(self, class_names: List[str]):
-        """Initialize error analyzer."""
-        self.class_names = class_names
-        self.num_classes = len(class_names)
-    
-    def analyze(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        y_proba: Optional[np.ndarray] = None,
-        texts: Optional[List[str]] = None,
-        class_names: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
-        """
-        Analyze misclassification patterns.
-        
-        Args:
-            y_true: True labels
-            y_pred: Predicted labels
-            y_proba: Prediction probabilities
-            texts: Original texts
-            class_names: Class names
-            
-        Returns:
-            Dictionary with error analysis results
-        """
-        class_names = class_names or self.class_names
-        
-        # Find misclassified samples
-        misclassified_mask = (y_true != y_pred)
-        misclassified_indices = np.where(misclassified_mask)[0]
-        
-        # Misclassification patterns
-        patterns = self._analyze_patterns(y_true, y_pred, class_names)
-        
-        # Confidence analysis
-        confidence_analysis = {}
-        if y_proba is not None:
-            confidence_analysis = self._analyze_confidence(
-                y_true, y_pred, y_proba, misclassified_mask
-            )
-        
-        # Text analysis (if available)
-        text_analysis = {}
-        if texts is not None:
-            text_analysis = self._analyze_texts(
-                y_true, y_pred, texts, misclassified_indices, class_names
-            )
-        
-        return {
-            'patterns': patterns,
-            'confidence': confidence_analysis,
-            'text_analysis': text_analysis,
-            'misclassification_rate': float(misclassified_mask.mean()),
-            'num_misclassified': int(misclassified_mask.sum()),
-            'total_samples': len(y_true)
-        }
-    
-    def _analyze_patterns(
-        self, 
-        y_true: np.ndarray, 
-        y_pred: np.ndarray, 
-        class_names: List[str]
-    ) -> Dict[str, Any]:
-        """Analyze misclassification patterns."""
-        # Create confusion matrix
-        cm = confusion_matrix(y_true, y_pred, labels=range(self.num_classes))
-        
-        # Find most common misclassifications
-        misclassifications = []
-        for true_idx in range(self.num_classes):
-            for pred_idx in range(self.num_classes):
-                if true_idx != pred_idx and cm[true_idx, pred_idx] > 0:
-                    misclassifications.append({
-                        'true_class': class_names[true_idx],
-                        'pred_class': class_names[pred_idx],
-                        'count': int(cm[true_idx, pred_idx]),
-                        'true_idx': true_idx,
-                        'pred_idx': pred_idx
-                    })
-        
-        # Sort by frequency
-        misclassifications.sort(key=lambda x: x['count'], reverse=True)
-        
-        # Analyze crisis-specific patterns
-        crisis_patterns = self._analyze_crisis_patterns(y_true, y_pred, class_names)
-        
-        return {
-            'top_misclassifications': misclassifications[:10],
-            'crisis_patterns': crisis_patterns,
-            'confusion_matrix': cm.tolist()
-        }
-    
-    def _analyze_crisis_patterns(
-        self, 
-        y_true: np.ndarray, 
-        y_pred: np.ndarray, 
-        class_names: List[str]
-    ) -> Dict[str, Any]:
-        """Analyze crisis-specific misclassification patterns."""
-        patterns = {}
-        
-        # Humanitarian vs non-humanitarian confusion
-        humanitarian_classes = [0, 1, 2, 3]
-        non_humanitarian_classes = [4, 5]
-        
-        # Cases where humanitarian crises are missed (false negatives)
-        humanitarian_fn = 0
-        for true_label in range(len(y_true)):
-            if y_true[true_label] in humanitarian_classes and y_pred[true_label] in non_humanitarian_classes:
-                humanitarian_fn += 1
-        
-        # Cases where non-humanitarian is classified as humanitarian (false positives)
-        humanitarian_fp = 0
-        for true_label in range(len(y_true)):
-            if y_true[true_label] in non_humanitarian_classes and y_pred[true_label] in humanitarian_classes:
-                humanitarian_fp += 1
-        
-        patterns['humanitarian_missed'] = humanitarian_fn
-        patterns['false_humanitarian_alerts'] = humanitarian_fp
-        
-        # Critical crisis misclassification
-        critical_classes = [0, 2]  # Urgent needs and casualties
-        critical_missed = 0
-        
-        for i in range(len(y_true)):
-            if y_true[i] in critical_classes and y_pred[i] not in critical_classes:
-                critical_missed += 1
-        
-        patterns['critical_crises_missed'] = critical_missed
-        
-        return patterns
-    
-    def _analyze_confidence(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        y_proba: np.ndarray,
-        misclassified_mask: np.ndarray
-    ) -> Dict[str, Any]:
-        """Analyze confidence score distributions."""
-        confidence_scores = np.max(y_proba, axis=1)
-        
-        # Overall confidence statistics
-        overall_stats = {
-            'mean_confidence': float(np.mean(confidence_scores)),
-            'std_confidence': float(np.std(confidence_scores)),
-            'median_confidence': float(np.median(confidence_scores))
-        }
-        
-        # Confidence for correct vs incorrect predictions
-        correct_confidence = confidence_scores[~misclassified_mask]
-        incorrect_confidence = confidence_scores[misclassified_mask]
-        
-        confidence_comparison = {
-            'correct_mean': float(np.mean(correct_confidence)) if len(correct_confidence) > 0 else 0.0,
-            'incorrect_mean': float(np.mean(incorrect_confidence)) if len(incorrect_confidence) > 0 else 0.0,
-            'correct_std': float(np.std(correct_confidence)) if len(correct_confidence) > 0 else 0.0,
-            'incorrect_std': float(np.std(incorrect_confidence)) if len(incorrect_confidence) > 0 else 0.0
-        }
-        
-        # High confidence errors (overconfident mistakes)
-        high_confidence_threshold = 0.8
-        high_conf_errors = np.sum((confidence_scores > high_confidence_threshold) & misclassified_mask)
-        
-        return {
-            'overall_stats': overall_stats,
-            'correct_vs_incorrect': confidence_comparison,
-            'high_confidence_errors': int(high_conf_errors),
-            'high_confidence_threshold': high_confidence_threshold
-        }
-    
-    def _analyze_texts(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        texts: List[str],
-        misclassified_indices: np.ndarray,
-        class_names: List[str]
-    ) -> Dict[str, Any]:
-        """Analyze text characteristics of misclassified samples."""
-        if len(misclassified_indices) == 0:
-            return {'message': 'No misclassified samples found'}
-        
-        # Text length analysis
-        misclassified_texts = [texts[i] for i in misclassified_indices]
-        misclassified_lengths = [len(text.split()) for text in misclassified_texts]
-        
-        # All text lengths for comparison
-        all_lengths = [len(text.split()) for text in texts]
-        
-        length_analysis = {
-            'misclassified_mean_length': float(np.mean(misclassified_lengths)),
-            'all_mean_length': float(np.mean(all_lengths)),
-            'misclassified_std_length': float(np.std(misclassified_lengths)),
-            'all_std_length': float(np.std(all_lengths))
-        }
-        
-        # Sample misclassified examples (up to 5 per error type)
-        error_examples = defaultdict(list)
-        
-        for idx in misclassified_indices[:20]:  # Limit to first 20 for performance
-            true_class = class_names[y_true[idx]]
-            pred_class = class_names[y_pred[idx]]
-            error_type = f"{true_class} → {pred_class}"
-            
-            if len(error_examples[error_type]) < 3:  # Max 3 examples per error type
-                error_examples[error_type].append({
-                    'text': texts[idx][:200] + "..." if len(texts[idx]) > 200 else texts[idx],
-                    'true_class': true_class,
-                    'pred_class': pred_class,
-                    'text_length': len(texts[idx].split())
-                })
-        
-        return {
-            'length_analysis': length_analysis,
-            'error_examples': dict(error_examples)
-        }
 
 
 class ResponseTimeSimulator:
@@ -1041,7 +706,8 @@ def evaluate_model(
         evaluator.plot_precision_recall_curves(y_true, y_proba)
         
         if y_proba is not None:
-            evaluator.calibration_analyzer.plot_calibration_curve(y_true, y_proba)
+            # evaluator.calibration_analyzer.plot_calibration_curve(y_true, y_proba) # Removed
+            pass # Placeholder for future integration
     
     return results
 
@@ -1228,8 +894,9 @@ The Expected Calibration Error measures how well the model's confidence scores a
     # Check for high confidence errors
     high_conf_errors = results.confidence_distribution.get('high_confidence_errors', 0)
     total_errors = results.misclassification_patterns.get('num_misclassified', 1)
-    if high_conf_errors / total_errors > 0.3:
-        recommendations.append("High rate of overconfident errors - review training regularization and confidence thresholding")
+    if total_errors > 0: # Avoid division by zero
+        if high_conf_errors / total_errors > 0.3:
+            recommendations.append("High rate of overconfident errors - review training regularization and confidence thresholding")
     
     # Response time recommendations
     efficiency = results.response_time_metrics.get('response_efficiency', 1.0)

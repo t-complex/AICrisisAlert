@@ -69,10 +69,39 @@ class ModelService:
         """Cleanup resources."""
         try:
             logger.info("Cleaning up model service")
+            
+            # Clear GPU memory if model was on GPU
+            if self.model is not None:
+                if hasattr(self.model, 'cpu'):
+                    self.model.cpu()
+                del self.model
+                
+            if self.tokenizer is not None:
+                del self.tokenizer
+                
+            if self.feature_extractor is not None:
+                del self.feature_extractor
+            
+            # Clear references
             self.model = None
             self.tokenizer = None
             self.feature_extractor = None
             self.is_initialized = False
+            
+            # Force memory cleanup
+            import gc
+            gc.collect()
+            
+            # Clear CUDA cache if available
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    logger.info("CUDA cache cleared during model service cleanup")
+            except ImportError:
+                pass
+                
             logger.info("Model service cleanup completed")
         except Exception as e:
             logger.error(f"Error during model service cleanup: {e}")

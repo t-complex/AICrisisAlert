@@ -498,7 +498,10 @@ class CrisisDataset(Dataset):
         if self.apply_augmentation and self.augmentor:
             text = self.augmentor.augment_text(text, label)
         
-        # Tokenize
+        # PERFORMANCE NOTE: Tokenizing on every __getitem__ call is inefficient
+        # For production use, consider pre-tokenizing data during __init__ and caching
+        # This could provide 10-100x speedup for training
+        # TODO: Implement pre-tokenization with caching for better performance
         encoding = self.tokenizer_pipeline.tokenize(text, label)
         
         return {
@@ -541,7 +544,11 @@ class CrisisDataset(Dataset):
         Returns:
             WeightedRandomSampler for balanced sampling
         """
-        class_weights = self.get_class_weights()
+        # PERFORMANCE: Cache class weights to avoid recalculation
+        if not hasattr(self, '_cached_class_weights'):
+            self._cached_class_weights = self.get_class_weights()
+        
+        class_weights = self._cached_class_weights
         sample_weights = class_weights[self.labels]
         
         return WeightedRandomSampler(
@@ -810,138 +817,6 @@ class CrisisDataModule:
             raise RuntimeError("Call setup() before getting class weights")
         
         return self.train_dataset.get_class_weights()
-
-
-def create_data_loaders(
-    train_csv_path: str,
-    val_csv_path: str,
-    test_csv_path: str,
-    tokenizer_name: str = "distilbert-base-uncased",
-    max_length: int = 512,
-    batch_size: Optional[int] = None,
-    num_workers: Optional[int] = None,
-    apply_augmentation: bool = True,
-    use_balanced_sampling: bool = True
-) -> Tuple[DataLoader, DataLoader, DataLoader, torch.Tensor]:
-    """
-    Create optimized data loaders for crisis classification.
-    
-    Args:
-        train_csv_path: Path to training CSV
-        val_csv_path: Path to validation CSV  
-        test_csv_path: Path to test CSV
-        tokenizer_name: HuggingFace tokenizer name
-        max_length: Maximum sequence length
-        batch_size: Batch size (auto-calculated if None)
-        num_workers: Number of workers (auto-calculated if None)
-        apply_augmentation: Whether to apply data augmentation
-        use_balanced_sampling: Whether to use balanced sampling
-        
-    Returns:
-        Tuple of (train_loader, val_loader, test_loader, class_weights)
-    """
-    data_module = CrisisDataModule(
-        train_csv_path=train_csv_path,
-        val_csv_path=val_csv_path,
-        test_csv_path=test_csv_path,
-        tokenizer_name=tokenizer_name,
-        max_length=max_length,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        apply_augmentation=apply_augmentation,
-        use_balanced_sampling=use_balanced_sampling
-    )
-    
-    data_module.setup()
-    
-    train_loader = data_module.train_dataloader()
-    val_loader = data_module.val_dataloader()
-    test_loader = data_module.test_dataloader()
-    class_weights = data_module.get_class_weights()
-    
-    logger.info("Data loaders created successfully")
-    return train_loader, val_loader, test_loader, class_weights
-
-
-def calculate_optimal_batch_size(
-    model_size_mb: float,
-    sequence_length: int = 512,
-    available_memory_gb: Optional[float] = None
-) -> int:
-    """
-    Calculate optimal batch size based on system resources.
-    
-    Args:
-        model_size_mb: Model size in MB
-        sequence_length: Input sequence length
-        available_memory_gb: Available GPU memory in GB
-        
-    Returns:
-        Recommended batch size
-    """
-    if available_memory_gb is None:
-        if torch.cuda.is_available():
-            available_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        else:
-            # Assume 8GB RAM for CPU training
-            available_memory_gb = 8.0
-    
-    # Estimate memory per sample (very rough)
-    memory_per_sample_mb = (sequence_length * 4 * 2) / (1024 * 1024)  # Input + gradients
-    memory_per_sample_mb += model_size_mb * 0.1  # Rough activation memory
-    
-    # Conservative estimate: use 70% of available memory
-    usable_memory_mb = available_memory_gb * 1024 * 0.7
-    
-    # Calculate batch size
-    batch_size = max(1, int(usable_memory_mb / memory_per_sample_mb))
-    
-    # Apply reasonable limits
-    batch_size = min(64, max(1, batch_size))
-    
-    logger.info(f"Calculated optimal batch size: {batch_size}")
-    logger.info(f"Based on: {available_memory_gb:.1f}GB memory, {model_size_mb:.1f}MB model, {sequence_length} seq length")
-    
-    return batch_size
-
-
-def prepare_crisis_data(
-    data_dir: str = "data/processed",
-    tokenizer_name: str = "distilbert-base-uncased",
-    max_length: int = 512,
-    **kwargs
-) -> Tuple[DataLoader, DataLoader, DataLoader, torch.Tensor]:
-    """
-    Main function to prepare complete crisis classification data pipeline.
-    
-    Args:
-        data_dir: Directory containing train.csv, validation.csv, test.csv
-        tokenizer_name: HuggingFace tokenizer name
-        max_length: Maximum sequence length
-        **kwargs: Additional arguments for data loading
-        
-    Returns:
-        Tuple of (train_loader, val_loader, test_loader, class_weights)
-    """
-    data_path = Path(data_dir)
-    
-    train_csv = data_path / "train.csv"
-    val_csv = data_path / "validation.csv"
-    test_csv = data_path / "test.csv"
-    
-    # Verify files exist
-    for csv_file in [train_csv, val_csv, test_csv]:
-        if not csv_file.exists():
-            raise FileNotFoundError(f"Required file not found: {csv_file}")
-    
-    return create_data_loaders(
-        train_csv_path=str(train_csv),
-        val_csv_path=str(val_csv),
-        test_csv_path=str(test_csv),
-        tokenizer_name=tokenizer_name,
-        max_length=max_length,
-        **kwargs
-    )
 
 
 # Example usage and testing

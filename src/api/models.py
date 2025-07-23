@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from enum import Enum
 
+import re
 from pydantic import BaseModel, Field, validator
 
 class CrisisCategory(str, Enum):
@@ -25,9 +26,44 @@ class CrisisClassificationRequest(BaseModel):
     
     @validator('text')
     def validate_text(cls, v):
-        if not v.strip():
+        if not v or not v.strip():
             raise ValueError('Text cannot be empty')
-        return v.strip()
+        
+        # Remove excessive whitespace
+        cleaned_text = re.sub(r'\s+', ' ', v.strip())
+        
+        # Check for potentially malicious content
+        if re.search(r'<script|javascript:|data:|vbscript:', cleaned_text, re.IGNORECASE):
+            raise ValueError('Text contains potentially malicious content')
+        
+        # Check for excessively repeated characters (potential spam/DoS)
+        if re.search(r'(.)\1{100,}', cleaned_text):
+            raise ValueError('Text contains excessive repeated characters')
+        
+        # Basic length validation (additional to Field constraint)
+        if len(cleaned_text) < 3:
+            raise ValueError('Text must be at least 3 characters long')
+        
+        return cleaned_text
+    
+    @validator('source')
+    def validate_source(cls, v):
+        if v is not None:
+            v = v.strip()
+            if not re.match(r'^[a-zA-Z0-9_-]+$', v):
+                raise ValueError('Source must contain only alphanumeric characters, underscores, and hyphens')
+        return v
+    
+    @validator('location')
+    def validate_location(cls, v):
+        if v is not None:
+            v = v.strip()
+            # Basic location validation - allow letters, numbers, spaces, commas, periods
+            if not re.match(r'^[a-zA-Z0-9\s,.-]+$', v):
+                raise ValueError('Location contains invalid characters')
+            if len(v) > 200:
+                raise ValueError('Location must be less than 200 characters')
+        return v
 
 class CrisisClassificationResponse(BaseModel):
     """Response model for crisis classification."""

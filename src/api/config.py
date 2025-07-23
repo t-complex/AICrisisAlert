@@ -30,9 +30,18 @@ class Settings:
         self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         
         # Security Configuration
-        self.secret_key = os.getenv("SECRET_KEY", "your-secret-key-here")
-        self.allowed_hosts = os.getenv("ALLOWED_HOSTS", "*").split(",")
-        self.cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
+        self.secret_key = os.getenv("SECRET_KEY")
+        if not self.secret_key or self.secret_key == "your-secret-key-here":
+            raise ValueError("SECRET_KEY environment variable must be set to a secure value")
+        if len(self.secret_key) < 32:
+            raise ValueError("SECRET_KEY must be at least 32 characters long")
+            
+        self.allowed_hosts = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+        # Security: Don't allow wildcard CORS origins by default
+        cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000")
+        self.cors_origins = cors_origins_env.split(",") if cors_origins_env != "*" else []
+        if not self.cors_origins:
+            raise ValueError("CORS_ORIGINS must be explicitly configured - wildcard (*) not allowed for security")
         
         # Logging Configuration
         self.log_level = os.getenv("LOG_LEVEL", "INFO")
@@ -52,6 +61,17 @@ class Settings:
         self.emergency_threshold = float(os.getenv("EMERGENCY_THRESHOLD", "0.8"))
         self.batch_size_limit = int(os.getenv("BATCH_SIZE_LIMIT", "100"))
         self.max_text_length = int(os.getenv("MAX_TEXT_LENGTH", "10000"))
+        
+        # API Security Configuration
+        self.api_key = os.getenv("API_KEY")
+        if not self.api_key:
+            raise ValueError("API_KEY environment variable must be set for authentication")
+        if len(self.api_key) < 32:
+            raise ValueError("API_KEY must be at least 32 characters long")
+            
+        # Rate limiting configuration
+        self.rate_limit_requests = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))
+        self.rate_limit_period = int(os.getenv("RATE_LIMIT_PERIOD", "3600"))  # 1 hour
         
         # Notification Configuration
         self.enable_notifications = os.getenv("ENABLE_NOTIFICATIONS", "false").lower() == "true"
